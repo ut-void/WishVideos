@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Beat-Sync Photo Montage & Wish Video Maker</title>
+  <style>
+    :root {
+      --bg: #121212;
+      --panel: #1e1e1e;
+      --accent: #eab308;
+      --text: #f3f4f6;
+    }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-wrap: wrap;
+      min-height: 100vh;
+    }
+    .sidebar {
+      width: 380px;
+      max-width: 100%;
+      background: var(--panel);
+      padding: 20px;
+      box-sizing: border-box;
+      border-right: 1px solid #333;
+    }
+    .preview-area {
+      flex: 1;
+      min-width: 300px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: #090909;
+    }
+    h2 {
+      margin-top: 0;
+      font-size: 1.25rem;
+      color: var(--accent);
+    }
+    .form-group {
+      margin-bottom: 14px;
+    }
+    label {
+      display: block;
+      font-size: 0.85rem;
+      margin-bottom: 6px;
+      color: #aaa;
+    }
+    input[type="text"],
+    select,
+    textarea {
+      width: 100%;
+      padding: 10px;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      color: #fff;
+      border-radius: 6px;
+      box-sizing: border-box;
+      font-size: 0.9rem;
+    }
+    input[type="file"] {
+      width: 100%;
+      font-size: 0.85rem;
+      color: #ccc;
+    }
+    .btn {
+      width: 100%;
+      padding: 12px;
+      background: var(--accent);
+      color: #000;
+      font-weight: 700;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-top: 8px;
+      font-size: 0.95rem;
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .btn-secondary {
+      background: #3b82f6;
+      color: #fff;
+    }
+    canvas {
+      max-height: 75vh;
+      max-width: 100%;
+      border: 2px solid #333;
+      border-radius: 8px;
+      background: #000;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+    }
+    .status {
+      margin-top: 12px;
+      font-size: 0.9rem;
+      color: var(--accent);
+      text-align: center;
+    }
+  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Alex+Brush&family=Montserrat:wght@800&family=Playfair+Display:ital,wght@0,700;1,700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <div class="sidebar">
+    <h2>Video Template Builder</h2>
+
+    <div class="form-group">
+      <label>1. Upload Photos (Up to 20 photos)</label>
+      <input type="file" id="photoInput" accept="image/*" multiple>
+      <small id="photoCount" style="color:#888;">0 / 20 selected</small>
+    </div>
+
+    <div class="form-group">
+      <label>2. Upload Audio or Reference Video (MP3 / MP4)</label>
+      <input type="file" id="audioInput" accept="audio/*,video/*">
+    </div>
+
+    <div class="form-group">
+      <label>3. Aspect Ratio</label>
+      <select id="aspectRatio">
+        <option value="16:9">16:9 (Landscape - 1280x720)</option>
+        <option value="9:16">9:16 (Vertical Reel/Story - 720x1280)</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>4. Final Wish Text</label>
+      <input type="text" id="wishText" value="Happy 1st Birthday!">
+    </div>
+
+    <div class="form-group">
+      <label>5. Custom Name</label>
+      <input type="text" id="customName" value="Baby Aria">
+    </div>
+
+    <div class="form-group">
+      <label>6. Custom Date</label>
+      <input type="text" id="customDate" value="16 October 2026">
+    </div>
+
+    <div class="form-group">
+      <label>7. Center Highlight Word (e.g., HER / HIM / YOU)</label>
+      <input type="text" id="centerWord" value="HER">
+    </div>
+
+    <div class="form-group">
+      <label>8. Intro & Bridge Timed Words</label>
+      <textarea id="timedWords" rows="2">I, DIDN'T, KNOW, WHAT, I WAS, LOOKING, FOR, 'TIL, I, FOUND, I, FOUND, HER</textarea>
+    </div>
+
+    <button class="btn" id="previewBtn">Preview Animation</button>
+    <button class="btn btn-secondary" id="recordBtn">Render & Download Video</button>
+  </div>
+
+  <div class="preview-area">
+    <canvas id="videoCanvas" width="1280" height="720"></canvas>
+    <div class="status" id="statusText">Upload photos to begin.</div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('videoCanvas');
+    const ctx = canvas.getContext('2d');
+    const photoInput = document.getElementById('photoInput');
+    const audioInput = document.getElementById('audioInput');
+    const aspectSelect = document.getElementById('aspectRatio');
+    const previewBtn = document.getElementById('previewBtn');
+    const recordBtn = document.getElementById('recordBtn');
+    const statusText = document.getElementById('statusText');
+
+    let loadedImages = [];
+    let audioFileURL = null;
+    let animationFrameId = null;
+
+    aspectSelect.addEventListener('change', () => {
+      if (aspectSelect.value === '16:9') {
+        canvas.width = 1280;
+        canvas.height = 720;
+      } else {
+        canvas.width = 720;
+        canvas.height = 1280;
+      }
+      drawIdleScreen();
+    });
+
+    photoInput.addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files).slice(0, 20);
+      document.getElementById('photoCount').textContent = `${files.length} / 20 selected`;
+      loadedImages = [];
+
+      for (const file of files) {
+        const img = new Image();
+        img.src = URL.createObjectURL(file);
+        await new Promise(res => img.onload = res);
+        loadedImages.push(img);
+      }
+      statusText.textContent = `${loadedImages.length} photos loaded ready for rendering.`;
+      drawIdleScreen();
+    });
+
+    audioInput.addEventListener('change', (e) => {
+      if (e.target.files[0]) {
+        audioFileURL = URL.createObjectURL(e.target.files[0]);
+      }
+    });
+
+    function drawIdleScreen() {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#eab308';
+      ctx.font = '800 40px Montserrat, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('READY TO PREVIEW', canvas.width / 2, canvas.height / 2);
+    }
+
+    function drawImageCover(img, x, y, w, h) {
+      if (!img) return;
+      const imgRatio = img.width / img.height;
+      const targetRatio = w / h;
+      let sx, sy, sw, sh;
+
+      if (imgRatio > targetRatio) {
+        sh = img.height;
+        sw = sh * targetRatio;
+        sx = (img.width - sw) / 2;
+        sy = 0;
+      } else {
+        sw = img.width;
+        sh = sw / targetRatio;
+        sx = 0;
+        sy = (img.height - sh) / 2;
+      }
+      ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+    }
+
+    function renderFrame(t) {
+      const W = canvas.width;
+      const H = canvas.height;
+      const words = document.getElementById('timedWords').value.split(',').map(s => s.trim());
+      const getWord = (i) => words[i] || '';
+      const centerWord = document.getElementById('centerWord').value.trim() || 'HER';
+
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, W, H);
+
+      const introCues = [
+        { start: 0.4, end: 0.8, text: getWord(0) },
+        { start: 0.8, end: 1.3, text: getWord(1) },
+        { start: 1.3, end: 1.8, text: getWord(2) },
+        { start: 1.8, end: 2.2, text: getWord(3) },
+        { start: 2.2, end: 2.6, text: getWord(4) },
+        { start: 2.6, end: 3.1, text: getWord(5) },
+        { start: 3.1, end: 3.8, text: getWord(6) },
+        { start: 4.3, end: 5.0, text: getWord(7) },
+        { start: 5.0, end: 5.6, text: getWord(8) },
+        { start: 5.6, end: 6.3, text: getWord(9) }
+      ];
+
+      const fonts = [
+        `800 ${Math.round(W * 0.09)}px "Montserrat", sans-serif`,
+        `italic 700 ${Math.round(W * 0.09)}px "Playfair Display", serif`,
+        `400 ${Math.round(W * 0.12)}px "Alex Brush", cursive`
+      ];
+
+      // PHASE 1: 0.0s - 6.3s (Yellow Words on Black)
+      if (t < 6.3) {
+        const activeCue = introCues.find(c => t >= c.start && t < c.end);
+        if (activeCue) {
+          ctx.fillStyle = '#d4af37';
+          ctx.font = `800 ${Math.round(W * 0.085)}px "Montserrat", sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(activeCue.text.toUpperCase(), W / 2, H / 2);
+        }
+      }
+
+      // PHASE 2: 6.3s - 8.2s (Horizontal Slit Expanding Reveal + Rapid Photo Cycling)
+      else if (t >= 6.3 && t < 8.2) {
+        const progress = (t - 6.3) / (8.2 - 6.3);
+        const minSlit = H * 0.14;
+        const currentH = minSlit + (H - minSlit) * Math.pow(progress, 1.8);
+        const slitY = (H - currentH) / 2;
+
+        // Rapidly cycle photos every 0.18s while the slit is expanding
+        const fastIdx = Math.floor((t - 6.3) / 0.18);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, slitY, W, currentH);
+        ctx.clip();
+        if (loadedImages.length > 0) {
+          const img = loadedImages[fastIdx % loadedImages.length];
+          drawImageCover(img, 0, 0, W, H);
+        }
+        ctx.restore();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = fonts[0];
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = 'rgba(0,0,0,0.5)';
+        ctx.shadowBlur = 12;
+        ctx.fillText(centerWord, W / 2, H / 2);
+        ctx.shadowBlur = 0;
+      }
+
+      // PHASE 3: 8.2s - 10.6s (Full Screen Rapid Montage + Font Cycling)
+      else if (t >= 8.2 && t < 10.6) {
+        const idx = Math.floor((t - 8.2) / 0.25);
+        if (loadedImages.length > 0) {
+          const img = loadedImages[idx % loadedImages.length];
+          drawImageCover(img, 0, 0, W, H);
+        }
+        ctx.fillStyle = '#ffffff';
+        ctx.font = fonts[idx % fonts.length];
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = 'rgba(0,0,0,0.6)';
+        ctx.shadowBlur = 15;
+        ctx.fillText(centerWord, W / 2, H / 2);
+        ctx.shadowBlur = 0;
+      }
+
+      // PHASE 4: 10.6s - 12.3s (Darkened Bridge Overlay + "I / FOUND / HER")
+      else if (t >= 10.6 && t < 12.3) {
+        if (loadedImages.length > 0) {
+          drawImageCover(loadedImages[0], 0, 0, W, H);
+        }
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+        ctx.fillRect(0, 0, W, H);
+
+        let bridgeText = '';
+        if (t < 11.2) bridgeText = getWord(10);
+        else if (t < 11.8) bridgeText = getWord(11);
+        else bridgeText = getWord(12);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = fonts[0];
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(bridgeText.toUpperCase(), W / 2, H / 2);
+      }
+
+      // PHASE 5: 12.3s - 17.5s (Second Rapid Photo Montage + Font Cycling)
+      else if (t >= 12.3 && t < 17.5) {
+        const idx = Math.floor((t - 12.3) / 0.24);
+        if (loadedImages.length > 0) {
+          const img = loadedImages[(idx + 4) % loadedImages.length];
+          drawImageCover(img, 0, 0, W, H);
+        }
+        ctx.fillStyle = '#ffffff';
+        ctx.font = fonts[idx % fonts.length];
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = 'rgba(0,0,0,0.65)';
+        ctx.shadowBlur = 15;
+        ctx.fillText(centerWord, W / 2, H / 2);
+        ctx.shadowBlur = 0;
+      }
+
+      // PHASE 6: 17.5s - 21.5s (Custom Photo Collage + Wish Card Overlay)
+      else {
+        const cols = W > H ? 5 : 4;
+        const rows = W > H ? 4 : 5;
+        const cellW = W / cols;
+        const cellH = H / rows;
+
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const cellIndex = r * cols + c;
+            if (loadedImages.length > 0) {
+              const img = loadedImages[cellIndex % loadedImages.length];
+              drawImageCover(img, c * cellW, r * cellH, cellW, cellH);
+            }
+          }
+        }
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+        ctx.fillRect(0, 0, W, H);
+
+        const cardW = W * 0.78;
+        const cardH = H * 0.42;
+        const cardX = (W - cardW) / 2;
+        const cardY = (H - cardH) / 2;
+
+        ctx.fillStyle = 'rgba(20, 20, 20, 0.85)';
+        ctx.fillRect(cardX, cardY, cardW, cardH);
+        ctx.strokeStyle = '#eab308';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(cardX, cardY, cardW, cardH);
+
+        const wish = document.getElementById('wishText').value;
+        const name = document.getElementById('customName').value;
+        const date = document.getElementById('customDate').value;
+
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        ctx.fillStyle = '#eab308';
+        ctx.font = `italic 700 ${Math.round(W * 0.045)}px "Playfair Display", serif`;
+        ctx.fillText(wish, W / 2, H / 2 - cardH * 0.22);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `800 ${Math.round(W * 0.065)}px "Montserrat", sans-serif`;
+        ctx.fillText(name.toUpperCase(), W / 2, H / 2 + cardH * 0.02);
+
+        ctx.fillStyle = '#cccccc';
+        ctx.font = `600 ${Math.round(W * 0.028)}px "Montserrat", sans-serif`;
+        ctx.fillText(date, W / 2, H / 2 + cardH * 0.26);
+      }
+    }
+
+    function startAnimation(isRecording = false) {
+      if (loadedImages.length === 0) {
+        alert('Please upload at least 1 photo first.');
+        return;
+      }
+      cancelAnimationFrame(animationFrameId);
+
+      const duration = 21.5;
+      const startTime = performance.now();
+      let audio = null;
+
+      if (audioFileURL) {
+        audio = new Audio(audioFileURL);
+        audio.play();
+      }
+
+      let mediaRecorder = null;
+      let recordedChunks = [];
+
+      if (isRecording) {
+        previewBtn.disabled = true;
+        recordBtn.disabled = true;
+        statusText.textContent = 'Recording video... Keep screen open for 21 seconds.';
+
+        const canvasStream = canvas.captureStream(30);
+        if (audio) {
+          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const source = audioCtx.createMediaElementSource(audio);
+          const dest = audioCtx.createMediaStreamDestination();
+          source.connect(dest);
+          source.connect(audioCtx.destination);
+          canvasStream.addTrack(dest.stream.getAudioTracks()[0]);
+        }
+
+        const candidates = [
+          'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+          'video/mp4;codecs=avc1,mp4a.40.2',
+          'video/mp4',
+          'video/webm;codecs=vp9,opus',
+          'video/webm;codecs=vp8,opus',
+          'video/webm'
+        ];
+        const mimeType = candidates.find(t => MediaRecorder.isTypeSupported(t)) || '';
+
+        mediaRecorder = new MediaRecorder(canvasStream, mimeType ? { mimeType } : undefined);
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) recordedChunks.push(e.data);
+        };
+        mediaRecorder.onstop = async () => {
+          const isMp4 = mimeType.includes('mp4');
+          const raw = new Blob(recordedChunks, { type: isMp4 ? 'video/mp4' : 'video/webm' });
+          const name = `wish-video-${aspectSelect.value.replace(':','-')}`;
+          if (isMp4) {
+            saveBlob(raw, name + '.mp4');
+            statusText.textContent = 'Video downloaded (MP4)!';
+          } else {
+            try {
+              const mp4 = await convertToMp4(raw);
+              saveBlob(mp4, name + '.mp4');
+              statusText.textContent = 'Video downloaded (MP4)!';
+            } catch (err) {
+              console.error(err);
+              saveBlob(raw, name + '.webm');
+              statusText.textContent = 'MP4 conversion failed (check internet). Downloaded WebM instead.';
+            }
+          }
+          previewBtn.disabled = false;
+          recordBtn.disabled = false;
+        };
+        mediaRecorder.start();
+      } else {
+        statusText.textContent = 'Playing preview...';
+      }
+
+      function tick(now) {
+        const elapsed = (now - startTime) / 1000;
+        if (elapsed <= duration) {
+          renderFrame(elapsed);
+          animationFrameId = requestAnimationFrame(tick);
+        } else {
+          if (audio) audio.pause();
+          if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            mediaRecorder.stop();
+          } else {
+            statusText.textContent = 'Preview complete.';
+          }
+        }
+      }
+      animationFrameId = requestAnimationFrame(tick);
+    }
+
+    function saveBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
+
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        const el = document.createElement('script');
+        el.src = src;
+        el.onload = resolve;
+        el.onerror = () => reject(new Error('Could not load ' + src));
+        document.head.appendChild(el);
+      });
+    }
+
+    async function toBlobURL(url, type) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Could not fetch ' + url);
+      const blob = await res.blob();
+      return URL.createObjectURL(new Blob([blob], { type }));
+    }
+
+    // Converts WebM -> H.264/AAC MP4 (plays on WhatsApp, Instagram, iPhone, Android, Windows, Mac)
+    async function convertToMp4(webmBlob) {
+      statusText.textContent = 'Converting to MP4... (first time loads ~30 MB, please wait)';
+      const FF = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/';
+      const CORE = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd/';
+      if (!window.FFmpegWASM) await loadScript(FF + 'ffmpeg.js');
+      const ff = new window.FFmpegWASM.FFmpeg();
+      await ff.load({
+        classWorkerURL: await toBlobURL(FF + '814.ffmpeg.js', 'text/javascript'),
+        coreURL: await toBlobURL(CORE + 'ffmpeg-core.js', 'text/javascript'),
+        wasmURL: await toBlobURL(CORE + 'ffmpeg-core.wasm', 'application/wasm')
+      });
+      await ff.writeFile('in.webm', new Uint8Array(await webmBlob.arrayBuffer()));
+      statusText.textContent = 'Converting to MP4... almost done';
+      await ff.exec([
+        '-i', 'in.webm',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-r', '30',
+        '-c:a', 'aac', '-b:a', '160k',
+        '-movflags', '+faststart',
+        'out.mp4'
+      ]);
+      const data = await ff.readFile('out.mp4');
+      return new Blob([data.buffer], { type: 'video/mp4' });
+    }
+
+    previewBtn.addEventListener('click', () => startAnimation(false));
+    recordBtn.addEventListener('click', () => startAnimation(true));
+
+    drawIdleScreen();
+  </script>
+</body>
+</html>
+
